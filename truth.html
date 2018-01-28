@@ -1,0 +1,362 @@
+<!doctype html>
+<html>
+<head>
+<title>Truth Table Builder</title>
+<style>
+	input {
+		font-size: 90%;
+	}
+	#output table {
+		border: 1px solid #777;
+		border-left: 0;
+	}
+	#output th, #output td {
+		border-left: 1px solid #777;
+		padding: 2pt 4pt;
+		width: 40px;
+		white-space: nowrap;
+		text-align: center;
+	}
+	#output th {
+		border-bottom: 1px solid #777;
+		background-color: #ddd;
+		font-family: serif;
+		font-style: italic;
+		font-size: 16px;
+	}
+	.lite {
+		background-color: #E4EBD8;
+	}
+	.med {
+		background-color: #B0C38B;
+	}
+	.dark {
+		background-color: #7F9455;
+	}
+	#msg {
+		margin-left: 10px;
+	}
+	#msg pre {
+		font-weight: bold;
+		font-size: 110%;
+	}
+</style>
+<script>
+	/*
+		Simple recursive decent parser based on this syntax:
+	
+		expr		:= term [ binop term ]*
+		term		:= '~' term | '(' expr ')' | variable
+		binop		:= '&' | '|' | '^'
+		variable    := 'a' ... 'z' | 'A' ... 'Z'
+	
+		It takes an infix expression and turns into its postfix form.
+		
+		eg. this: ~ p & ( q | ~ r )
+		becomes:  p ~ q r ~ | &
+		
+		Returns a two-element array: 
+		[0] the postfix form of the expression as an array of tokens
+		[1] array of variable names referenced in the equation
+	*/
+	function parse(equationStr) 
+	{
+		var postFix = [];		// postfix form of equation
+		var variables = {};		// the variables used in equation
+		var eqnTokens;			// equation as array of tokens
+		var origTokens;			// copy of eqnTokens for error handling
+
+		// Parse expression: expr := term [ binop term ]*
+		function expr()
+		{
+			term();
+			while (eqnTokens[0] == "&" || eqnTokens[0] == "|" || eqnTokens[0] == "^") {
+				var op = eqnTokens.shift();
+				term();
+				postFix.push(op);
+			}
+		}
+	
+		// Parse term: term := '~' term | '(' expr ')' | variable
+		function term()
+		{
+			if (eqnTokens.length == 0)
+				fail("I was expecting more...");
+		
+			var token = eqnTokens.shift();
+		
+			if (token == "~") {
+				term();
+				postFix.push(token);
+			}
+			else if (token == "(") {
+				expr();
+				if (eqnTokens[0] != ")")
+					fail("Hmmm, your parentheses seem to be unbalanced. Is there a <b>)</b> missing?");
+				eqnTokens.shift();
+			}
+			else if (/[a-z]/i.test(token)) {
+				postFix.push(token);
+				variables[token] = token;
+			}
+			else {
+				eqnTokens.unshift(token);
+				fail("I didn't expect this <b>" + token + "</b>");
+			}
+		}
+	
+		// Report an error. Throws an exception with a formatted error message.
+		function fail(msg)
+		{
+			// Get number of tokens parsed.
+			var n = origTokens.length - eqnTokens.length;
+		
+			// Print "^" under the equation at error position.
+			var pad = "";
+			while (--n >= 0)
+				pad += "  ";
+			throw new Error("<pre>" + origTokens.join(" ") + "\n" + pad + "^</pre>" + msg);
+		}
+					
+		// Remove spaces and split the string into tokens. (Conveniently 
+		// they're all single characters!)
+		eqnTokens = equationStr.match(/\S/g);
+		if (eqnTokens == null)
+			throw new Error("Please enter an equation!");
+		
+		// Keep an unmodified copy in case there's an error.
+		origTokens = eqnTokens.slice();
+						
+		// Parse the equation.
+		expr();
+		
+		// Anything left over?
+		if (eqnTokens.length > 0) {
+			var token = eqnTokens[0];
+			if (token == ')')
+				fail("Hmmm, your parentheses seem to be unbalanced. Is there a <b>(</b> missing?");
+			else
+				fail("I didn't expect this <b>" + token + "</b>");
+		}
+		
+		return [postFix, Object.keys(variables)]
+	}
+		
+	// Translate the postfix form into a series of Javascript expressions that
+	// we can eval(). Returns an array of expressions. The first n-1 entries 
+	// represent intermediate subexpressions--one per operator. The last entry 
+	// is the full expression. If showExprs is false then only the final 
+	// expression is returned.
+	function compile(postFix, showExprs)
+	{
+		var lhs, rhs;		// left/right hand side operands
+		var expr;			// intermediate expression
+		var stack = [];		// stack used to build expressions
+		var exprs = [];		// intermediate expressions, one per operator
+		
+		for (var i = 0; i < postFix.length; i++) {
+			switch (postFix[i]) {
+				case '&':
+				case '|':
+				case '^':
+					rhs = stack.pop();
+					lhs = stack.pop();
+					// Technically we should be using logical operators here, but
+					// bitwise work fine on boolean values and there is no logical
+					// xor so this is a simple hack.
+					expr = "(" + lhs + " " + postFix[i] + " " + rhs + ")";
+					stack.push(expr);
+					exprs.push(expr);
+					break;
+				case '~':
+					rhs = stack.pop();
+					// Must use logical not though!
+					expr = "!" + rhs;
+					stack.push(expr);
+					exprs.push(expr);
+					break;
+				default:	// operand
+					stack.push(postFix[i]);
+					break;
+			}
+		}
+		
+		return showExprs ? exprs : exprs.slice(-1);
+	}
+
+	// Build the output table in the DOM element "where".
+	function buildTable(exprs, variables, where)
+	{
+		var numExprs = exprs.length;
+		var numVars = variables.length;
+		var numRows = Math.pow(2, numVars);
+		var i, id, fixup, row, v, vars = {}, expr, result;
+
+		var html = "<table cellspacing='0' cellpadding='0'>";
+		
+		// Build the header row.
+		html += "<thead><tr>";
+		for (i = 0; i < numVars; ++i) {
+			id = "r0c" + i;
+			html += "<th id='" + id +  "'>" + variables[i] + "</th>";
+		}
+		for (i = 0; i < numExprs; ++i) {
+			id = 'r0c' + (numVars + i);
+			
+			// Map javascript operators back to our equation operators.
+			fixup = exprs[i].replace(/!/g, '~');
+			
+			// Can't get IE7 to stop wrapping w/o using nobr!
+			html += "<th id='" + id + "'><nobr>" + fixup + "</nobr></th>";
+		}
+		html += "</tr></thead><tbody>";
+		
+		// Build one row for each unique combination of variable values.
+		for (row = 0; row < numRows ; ++row) {
+			html += "<tr>";
+			
+			// Set the variable values for this row and generate the variable columns.
+			for (i = 0; i < numVars; ++i) {
+				v = variables[i];
+				vars[v] = (row & (1 << (numVars - i - 1))) ? false : true;
+				id = "r" + (row + 1) + "c" + i;
+				html += "<td id='" + id + "' onmouseover='varOver(this)' onmouseout='varOut(this)'>" + (vars[v] ? "T" : "F") + "</td>";
+			}
+			
+			// Show all intermediate & final values.
+			for (i = 0; i < numExprs; i++) {
+				id = "r" + (row + 1) + "c" + (numVars + i);
+				
+				// "with" puts all variables used in the equation into scope, which might
+				// include "i", so don't use any single-letter variables inside "with".
+				expr = exprs[i];
+				with (vars)
+					result = eval(expr);
+					
+				html += "<td id='" + id + "' onmouseover='exprOver(this)' onmouseout='exprOut(this)'>" + (result ? "T" : "F") + "</td>";
+			}
+			html += "</tr>";
+		}
+
+		html += "</tbody></table>";
+		where.innerHTML = html;
+	}
+	
+	// Get table cell given row & column index.
+	function getCell(r, c) { 
+		return document.getElementById("r" + r + "c" + c);
+	}
+	
+	// Get [row, col] index of a cell.
+	function getRowCol(cell) { 
+		return cell.id.match(/\d+/g);
+	}
+	
+	// Get row index of a cell.
+	function getRow(cell) {
+		return getRowCol(cell)[0];
+	}
+	
+	// Get column index of a cell.
+	function getCol(cell) { 
+		return getRowCol(cell)[1]; 
+	}
+	
+	// Get column title (header text) of a cell.
+	function getColTitle(cell) { 
+		return getCell(0, getCol(cell)).textContent;
+	}
+	
+	// Get the column index for a variable.
+	function getVarCol(v)
+	{
+		var cell = getCell(0,0);
+		while (cell.textContent != v) {
+			cell = cell.nextSibling;
+		}
+		return getCol(cell);
+	}
+
+	// Handle mouse over a variable cell. Highlight cell and the row.
+	function varOver(elem)
+	{
+		elem.parentNode.className = "lite";	// row
+		elem.className = "dark";
+	}
+	
+	// Remove highlighting on mouse out.
+	function varOut(elem)
+	{
+		elem.parentNode.className = "";	// row
+		elem.className = "";
+	}
+	
+	// Handle mouse over an expression cell.
+	function exprOver(cell)
+	{
+		// Hilite the row and this cell.
+		cell.parentNode.className = "lite";
+		cell.className = "dark";
+		
+		// Also hilite the variables that participate in this sub-expression.
+		var expr = getColTitle(cell);
+		var vars = expr.match(/[a-z]/ig);
+		while (vars.length) {
+			var col = getVarCol(vars.shift());
+			getCell(getRow(cell), col).className = "med";
+		}
+	}
+	
+	// Handle mouse out of equation cell. Remove highlighting.
+	function exprOut(cell)
+	{
+		cell.parentNode.className = "";
+		cell = cell.parentNode.firstChild;
+		while (cell) {
+			cell.className = "";
+			cell = cell.nextSibling;
+		}
+	}
+	
+	// Handle form submission.
+	function doForm()
+	{
+		var input = document.getElementById("eqn");
+		var msg = document.getElementById("msg");
+		var output = document.getElementById("output");
+		var showExprs = document.getElementById("showExprs").checked;
+	
+		msg.innerHTML = "";
+		output.innerHTML = "";
+
+		try {
+			var r = parse(input.value), postfix = r[0], variables = r[1];
+			var exprs = compile(postfix, showExprs);
+			buildTable(exprs, variables, output);
+		} catch (e) {
+			msg.innerHTML = e.message;
+		}
+	}
+
+</script>
+</head>
+
+<body>
+<h2>Truth Table Builder</h2>
+
+<p>Enter an equation. You may use any of the letters <b>a</b> through <b>z</b> and 
+	the symbols <b>&</b> (and), <b>|</b> (or), <b>^</b> (xor), <b>~</b> (not), and <b>( )</b> (parentheses).
+	For example: ~p & (q | ~r)</p>
+
+<form onsubmit="doForm(); return false;">
+	<input type="text" id="eqn" size="40">
+	<input type="submit" name="Go" value="Go"><br>
+	<label><input type="checkbox" id="showExprs" checked="checked" onclick="doForm()">Show sub-expressions</label>
+</form>
+<br/>
+
+<div id="msg"></div>
+<div id="output"></div>
+
+</body>
+</html>
