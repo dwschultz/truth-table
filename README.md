@@ -61,7 +61,7 @@ will probably run out of memory if you really go crazy. Go ahead, try it, you kn
 
 Since this is just an HTML page with Javascript there isn't anything to install. Just open *truth.html* in your browser.
 
-This link should also work as a live preview from github: [truth.html](http://htmlpreview.github.io/?https://github.com/dwschultz/truth-table/blob/initial/truth.html)
+This link should also work as a live preview from github: [truth.html](http://htmlpreview.github.io/?https://github.com/dwschultz/truth-table/blob/master/truth.html)
 
 
 ## Background
