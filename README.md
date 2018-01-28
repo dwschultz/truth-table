@@ -1,6 +1,6 @@
 # Truth Table Builder
 
-This is a simple web application that builds a truth table for a boolean expression. It's intended as an aid 
+This is a simple web application that builds truth tables for boolean expressions. It's intended as an aid 
 to learning boolean arithmetic.
 
 Given an expression like
@@ -45,7 +45,7 @@ Expression may use the following variables and operators:
 
 ```~``` has highest precedence so ```~p & q``` is evaluated as ```(~p) & q``` rather than ```~(p & q)```.
 
-The binary operators associate left-to-right so ```a | b & c``` is evaluated at ```(a | b) & c``` 
+The binary operators associate left-to-right so ```a | b & c``` is evaluated as ```(a | b) & c``` 
 rather than ```a | (b & c)```. 
 
 Use parentheses to control the order of operations. The truth table shows expressions fully parenthesized so you 
